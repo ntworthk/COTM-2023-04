@@ -1,0 +1,246 @@
+---
+title: "How often are words used in reports?"
+author: "Nick Twort, HoustonKemp"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+format:
+  html:
+    code-fold: true
+    embed-resources: true
+---
+
+```{r}
+#| label: library
+#| echo: false
+#| output: false
+#| warning: false
+
+library(tidyverse)
+
+
+```
+
+## Introduction
+
+At HoustonKemp, we always try to be careful about the words we use in our writing, because accurary and clarity is important to us.
+
+That got us thinking - what can we learn from the words that we (and others) use when writing?
+
+Naturally, we wanted to see if we could answer this question using [R](https://www.r-project.org/).
+
+## Extracting words from documents
+
+Conveniently, the [`pdftools`](https://github.com/ropensci/pdftools) and [`tidytext`](https://github.com/juliasilge/tidytext) R packages provide most of the functionality we are after.
+
+We can write a function in R to extract the words from a PDF.
+
+
+```{r}
+#| label: scrape pdf function
+#| collapse: true
+
+library(pdftools)
+library(tidytext)
+library(ggpage)
+
+#' Function to extract words from PDF document
+#'
+#' @param .file URL or filepath of PDF document
+#' @param remove_stopwords boolean - do you want to remove stopwords? Default FALSE
+#'
+#' @return A tibble with the count and proportion of each word in the PDF
+analyse_pdf <- function(.file, remove_stopwords = FALSE) {
+  
+  # Download file if it is a URL
+  if (str_detect(.file, "^http")) {
+    tmp <- tempfile(fileext = ".pdf")
+    
+    download.file(
+      .file,
+      tmp,
+      mode = "wb"
+    )
+    # Otherwise, just read from file
+  } else {
+    
+    tmp <- .file
+    
+  }
+  
+  # Get the text from the PDF
+  txt <- pdf_text(tmp)
+  
+  # Convert paragraphs into lines
+  df <- nest_paragraphs(
+    data = rename(enframe(txt), page = name),
+    input = value,
+    width = 100
+  )
+  
+  # Split into words and convert to tibble
+  df <- unnest_tokens(df, word, text) |> as_tibble()
+  
+  # Remove stopwords if desired
+  if (remove_stopwords) {
+    df <- anti_join(df, get_stopwords(), by = join_by(word))
+  }
+  
+  # Count up the instances of each word
+  out <- count(df, word)
+  
+  # Add a proportion
+  mutate(out, p = n / sum(n))
+  
+}
+
+```
+
+Then we can apply the function to each report we are interested in. In this case, we're going to apply the function to each of the interim reports produced (so far) by the ACCC during its [digital platform services inquiry](https://www.accc.gov.au/inquiries-and-consultations/digital-platform-services-inquiry-2020-25).
+
+```{r}
+#| label: Analyse reports
+#| warning: false
+
+# Reports of interest
+reports <- c(
+  "ACCC DPSI1 interim report" = "https://www.accc.gov.au/system/files/ACCC%20Digital%20Platforms%20Service%20Inquiry%20-%20September%202020%20interim%20report.pdf",
+  "ACCC DPSI2 interim report" = "https://www.accc.gov.au/system/files/Digital%20platform%20services%20inquiry%20-%20March%202021%20interim%20report.pdf",
+  "ACCC DPSI3 interim report" = "https://www.accc.gov.au/system/files/DPB%20-%20DPSI%20-%20September%202021%20-%20Full%20Report%20-%2030%20September%202021%20%283%29_1.pdf",
+  "ACCC DPSI4 interim report" = "https://www.accc.gov.au/system/files/DPB%20-%20DPSI%20-%20March%202022%20-%20Full%20interim%20report%20-%2031%20March%202022.pdf",
+  "ACCC DPSI5 interim report" = "https://www.accc.gov.au/system/files/Digital%20platform%20services%20inquiry%20-%20September%202022%20interim%20report.pdf"
+)
+
+report_words <- map_dfr(reports, analyse_pdf, .id = "report")
+
+```
+
+## Digging into the words
+
+```{r}
+#| label: skip_words
+skip_words <- c("digital", "platform", "platforms", "services", "inquiry", "ACCC", "interim", "report", "accessed", "p")
+
+
+```
+
+Now that we've got those, let's look at the most frequently used words in each report:^[We have excluded numbers, month names and the words `r knitr::combine_words(paste0('"', skip_words, '"'), oxford_comma = FALSE)`.]
+
+```{r}
+#| label: common words
+
+# Get two most common words per report
+common_words <- report_words |> 
+  anti_join(get_stopwords(), by = "word") |> 
+  filter(!str_detect(word, "[0-9]")) |> 
+  filter(!word %in% tolower(skip_words)) |> 
+  filter(!word %in% tolower(month.name)) |> 
+  group_by(report) |> 
+  mutate(p_valid = n / sum(n)) |> 
+  arrange(desc(n)) |> 
+  mutate(word_num = row_number()) |> 
+  filter(word_num <= 2) |> 
+  ungroup()
+
+# Create a chart
+common_words |> 
+  mutate(word_num = fct_rev(fct_inorder(as.character(word_num)))) |> 
+  ggplot(aes(x = p_valid, y = report, fill = word_num)) +
+  geom_col(position = position_dodge()) +
+  geom_vline(xintercept = 0) +
+  geom_text(aes(label = word), position = position_dodge(width = 0.9), hjust = 1.05, colour = "white") +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 0.1), expand = expansion(mult = c(0, 0.05))) +
+  scale_y_discrete(labels = scales::label_wrap(width = 15)) +
+  scale_fill_manual(values = c("#232C31", "#008698"), guide = guide_none()) +
+  labs(
+    x = "Proportion of valid words in report",
+    y = NULL,
+    caption = "Source: HoustonKemp analysis. Chart by Nick Twort."
+    ) +
+  theme_minimal() +
+  theme(
+    panel.grid.major.y = element_blank()
+  )
+
+```
+
+We can see the general focus of each of the reports coming through, as the ACCC moved its focus from messaging, to apps and apps stores and through to search defaults and online marketplaces.^[Although the topic of the first interim report was "standalone online private messaging services", it also served as a summary of the ACCC's assessments more generally since the Digital Platforms Inquiry final report.]
+
+## Counting up the maybes
+
+It's also interesting to try and estimate the certainty of any given report based on the language used. One (very unscientific) way of tackling this is to look at the instances of qualifier words like "may", "can" and "could".
+
+The chart below shows that the DPSI report with the highest incidence of such words was the [fifth interim report](https://www.accc.gov.au/system/files/Digital%20platform%20services%20inquiry%20-%20September%202022%20interim%20report.pdf). This was the report in which the ACCC proposed regulatory reform for digital platforms.
+
+```{r}
+#| label: may the force be with you
+
+key_words <- c("may", "can", "could")
+
+# Mays, cans and could
+report_words |> 
+  filter(word %in% key_words) |> 
+  group_by(report) |> 
+  summarise(p = sum(p), .groups = "drop") |> 
+  arrange(p) |> 
+  mutate(
+    report = fct_inorder(report),
+    col = ifelse(row_number() == n(), "#ECAA2B", "#008698")
+  ) |> 
+  ggplot(aes(x = p, y = report, fill = col)) +
+  geom_col() +
+  geom_vline(xintercept = 0) +
+  scale_fill_identity() +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 0.1), expand = expansion(mult = c(0, 0.05))) +
+  scale_y_discrete(labels = scales::label_wrap(width = 15)) +
+  labs(
+    x = paste0("Proportion of ", knitr::combine_words(paste0('"', key_words, '"'), oxford_comma = FALSE), " in report"),
+    y = NULL,
+    caption = "Source: HoustonKemp analysis. Chart by Nick Twort."
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.major.y = element_blank()
+  )
+
+
+```
+
+## Self-referential reports
+
+Finally, we can also use these techniques to evaluate how the ACCC is building on its previous work with each report. Indeed, the word "ACCC" becomes more frequent across the five interim reports.
+
+```{r}
+#| label: label
+
+report_words |> 
+  filter(word == "accc") |> 
+  arrange(p) |> 
+  mutate(
+    report = fct_inorder(report),
+    col = ifelse(row_number() == n(), "#ECAA2B", "#008698")
+  ) |> 
+  ggplot(aes(x = p, y = report, fill = col)) +
+  geom_col() +
+  geom_vline(xintercept = 0) +
+  scale_fill_identity() +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 0.1), expand = expansion(mult = c(0, 0.05))) +
+  scale_y_discrete(labels = scales::label_wrap(width = 15)) +
+  labs(
+    title = 'How often does the ACCC say "ACCC"?',
+    x = paste0("Proportion of words in report"),
+    y = NULL,
+    caption = "Source: HoustonKemp analysis. Chart by Nick Twort."
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.major.y = element_blank()
+  )
+
+
+```
+
+```{r}
+#| label: Session info
+#| collapse: true
+sessionInfo()
+
+```
