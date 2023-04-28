@@ -106,7 +106,8 @@ reports <- c(
   "ACCC DPSI2 interim report" = "https://www.accc.gov.au/system/files/Digital%20platform%20services%20inquiry%20-%20March%202021%20interim%20report.pdf",
   "ACCC DPSI3 interim report" = "https://www.accc.gov.au/system/files/DPB%20-%20DPSI%20-%20September%202021%20-%20Full%20Report%20-%2030%20September%202021%20%283%29_1.pdf",
   "ACCC DPSI4 interim report" = "https://www.accc.gov.au/system/files/DPB%20-%20DPSI%20-%20March%202022%20-%20Full%20interim%20report%20-%2031%20March%202022.pdf",
-  "ACCC DPSI5 interim report" = "https://www.accc.gov.au/system/files/Digital%20platform%20services%20inquiry%20-%20September%202022%20interim%20report.pdf"
+  "ACCC DPSI5 interim report" = "https://www.accc.gov.au/system/files/Digital%20platform%20services%20inquiry%20-%20September%202022%20interim%20report.pdf",
+  "ACCC DPSI6 interim report" = "https://www.accc.gov.au/system/files/Digital%20platforms%20services%20inquiry%20-%20Interim%20report%206%20-%20Report%20on%20social%20media%20services_0.pdf"
 )
 
 report_words <- map_dfr(reports, analyse_pdf, .id = "report")
